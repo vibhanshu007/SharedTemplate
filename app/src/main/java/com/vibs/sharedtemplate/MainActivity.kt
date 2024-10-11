@@ -3,14 +3,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.webkit.URLUtil
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -30,10 +26,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             SharedTemplateTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     WebViewScreen()
                 }
             }
@@ -42,48 +35,60 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun WebViewScreen() {
-        // WebView creation inside Compose using AndroidView
+        // WebView inside Jetpack Compose using AndroidView
         AndroidView(
             factory = { context ->
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
-                    webViewClient = WebViewClient()
-                    webChromeClient = WebChromeClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                            val url = request.url.toString()
 
-                    // Set Download Listener to handle CSV download
-                    setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
-                        fileName = URLUtil.guessFileName(url, contentDisposition, mimetype)
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            // Scoped Storage handling for Android 10+ (API 29+)
-                            downloadFileUsingSAF(mimetype)
-                        } else {
-                            // Legacy storage for SDK 24-28
-                            downloadFileLegacy(url)
+                            // If the URL is pointing to CSV content, handle the download
+                            if (url.endsWith(".csv")) {
+                                handleCsvDownload(url)
+                                return true // Tell WebView we handled the download
+                            }
+                            return false // Let WebView load the page
                         }
                     }
-                    loadUrl("https://your-web-url.com") // Replace with your actual URL
+                    webChromeClient = WebChromeClient()
+
+                    // Load the initial URL
+                    loadUrl("https://your-web-url.com") // Replace with your actual web URL
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
     }
 
+    // Handle CSV Download for different Android versions
+    private fun handleCsvDownload(url: String) {
+        fileName = URLUtil.guessFileName(url, null, "text/csv")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Scoped Storage for Android 10+ (API 29+)
+            downloadFileUsingSAF("text/csv")
+        } else {
+            // Legacy storage for SDK 24-28
+            downloadFileLegacy(url)
+        }
+    }
+
     // Scoped Storage for Android 10+ (API 29+)
     private fun downloadFileUsingSAF(mimeType: String) {
-        createDocumentLauncher.launch(mimeType) // Correctly pass the MIME type as a string
+        createDocumentLauncher.launch(mimeType)
     }
 
     // SAF handling
-    private val createDocumentLauncher =
-        registerForActivityResult(CreateDocument("todo/todo")) { uri: Uri? ->
-            uri?.let { saveFileToUri(it) }
-        }
+    private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument()) { uri: Uri? ->
+        uri?.let { saveFileToUri(it) }
+    }
 
     // Save file using the provided Uri
     private fun saveFileToUri(uri: Uri) {
-        val fileUrl = "https://your-download-url.com/file.csv"  // Replace with actual file URL
-        val inputStream: InputStream = URL(fileUrl).openStream()
+        // No predefined URL, dynamically received via shouldOverrideUrlLoading()
+        val inputStream: InputStream = URL(fileName).openStream()
 
         contentResolver.openOutputStream(uri)?.use { outputStream ->
             inputStream.copyTo(outputStream)
