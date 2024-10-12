@@ -1,23 +1,25 @@
-import android.content.Intent
+import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.webkit.*
+import android.util.Base64
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.vibs.sharedtemplate.ui.theme.SharedTemplateTheme
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
-import java.net.URL
+import java.io.IOException
 
 class MainActivity : ComponentActivity() {
     private var fileName: String = "downloaded_file.csv"
@@ -26,89 +28,99 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             SharedTemplateTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     WebViewScreen()
                 }
             }
         }
     }
+}
 
-    @Composable
-    fun WebViewScreen() {
-        // WebView inside Jetpack Compose using AndroidView
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    settings.javaScriptEnabled = true
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                            val url = request.url.toString()
+@Composable
+fun WebViewScreen() {
+    val context = LocalContext.current
 
-                            // If the URL is pointing to CSV content, handle the download
-                            if (url.endsWith(".csv")) {
-                                handleCsvDownload(url)
-                                return true // Tell WebView we handled the download
-                            }
-                            return false // Let WebView load the page
-                        }
-                    }
-                    webChromeClient = WebChromeClient()
+    // File picker launcher
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            // Once the Uri is selected, save the file
+            handleCsvSave(uri, context)
+        }
+    }
 
-                    // Load the initial URL
-                    loadUrl("https://your-web-url.com") // Replace with your actual web URL
+    AndroidView(factory = { context ->
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.javaScriptCanOpenWindowsAutomatically = true
+            settings.setSupportMultipleWindows(true)
+
+            // Inject the JavaScript interface for blob handling
+            addJavascriptInterface(object {
+                @JavascriptInterface
+                fun processBase64Blob(base64Data: String) {
+                    // Call the document picker to save the file
+                    createDocumentLauncher.launch("downloaded_file.csv")
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-    }
+            }, "androidInterface")
 
-    // Handle CSV Download for different Android versions
-    private fun handleCsvDownload(url: String) {
-        fileName = URLUtil.guessFileName(url, null, "text/csv")
+            webChromeClient = WebChromeClient()
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                    if (url != null && url.endsWith(".csv")) {
+                        handleBlobDownload(view!!, url)
+                        return true // We are handling the download
+                    }
+                    return false // Let WebView load other URLs normally
+                }
+            }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Scoped Storage for Android 10+ (API 29+)
-            downloadFileUsingSAF("text/csv")
-        } else {
-            // Legacy storage for SDK 24-28
-            downloadFileLegacy(url)
+            loadUrl("https://your-web-url.com") // Load your web URL here
         }
-    }
+    })
+}
 
-    // Scoped Storage for Android 10+ (API 29+)
-    private fun downloadFileUsingSAF(mimeType: String) {
-        createDocumentLauncher.launch(mimeType)
-    }
+fun handleBlobDownload(webView: WebView, url: String) {
+    val jsCode = """
+        (function() {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '$url', true);
+            xhr.responseType = 'blob';
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    var blob = xhr.response;
+                    var reader = new FileReader();
+                    reader.onloadend = function() {
+                        var base64data = reader.result.split(',')[1]; // Extract base64 part
+                        window.androidInterface.processBase64Blob(base64data); // Send to Android
+                    };
+                    reader.readAsDataURL(blob); // Convert blob to base64
+                }
+            };
+            xhr.send();
+        })();
+    """.trimIndent()
 
-    // SAF handling
-    private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument()) { uri: Uri? ->
-        uri?.let { saveFileToUri(it) }
-    }
+    // Inject the JavaScript into the WebView to handle Blob download
+    webView.evaluateJavascript(jsCode, null)
+}
 
-    // Save file using the provided Uri
-    private fun saveFileToUri(uri: Uri) {
-        // No predefined URL, dynamically received via shouldOverrideUrlLoading()
-        val inputStream: InputStream = URL(fileName).openStream()
+fun handleCsvSave(uri: Uri, context: Context) {
+    // Decode base64 CSV content and save to the chosen location
+    val base64Data = "" // You need to keep track of base64Data
+    val decodedBytes = Base64.decode(base64Data, Base64.DEFAULT)
 
-        contentResolver.openOutputStream(uri)?.use { outputStream ->
-            inputStream.copyTo(outputStream)
+    try {
+        context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+            outputStream.write(decodedBytes)
+            Toast.makeText(context, "File saved successfully", Toast.LENGTH_LONG).show()
         }
-    }
-
-    // Legacy download handling for SDK 24-28
-    private fun downloadFileLegacy(url: String) {
-        val downloadFile = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
-        val inputStream: InputStream = URL(url).openStream()
-        FileOutputStream(downloadFile).use { outputStream ->
-            inputStream.copyTo(outputStream)
-        }
-
-        // Optionally open the downloaded file
-        val uri = Uri.fromFile(downloadFile)
-        val openFileIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "text/csv")
-            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-        }
-        startActivity(openFileIntent)
+    } catch (e: IOException) {
+        Toast.makeText(context, "Error saving file: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }
