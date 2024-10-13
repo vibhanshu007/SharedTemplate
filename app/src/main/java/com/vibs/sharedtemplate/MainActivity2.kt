@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity2 : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,6 +82,17 @@ fun WebViewScreen2() {
                     }
                     return super.shouldInterceptRequest(view, request)
                 }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    // Now it's safe to get cookies
+                    val cookies = getCookies(url)
+                    Log.d("Cookies", cookies ?: "No cookies found")
+                    // If cookies are available, proceed with fetching CSV
+                    if (cookies != null) {
+                        fetchCsv(url, cookies)
+                    }
+                }
             }
             loadUrl("https://your-web-url.com") // Load your web URL here
         }
@@ -119,6 +131,44 @@ suspend fun fetchCsvContent(url: String): String {
         e.printStackTrace()
         ""
     }
+}
+
+fun getCookies(url: String?): String? {
+    val cookieManager = CookieManager.getInstance()
+    return if (url != null) {
+        cookieManager.getCookie(url)
+    } else {
+        null
+    }
+}
+
+// Function to fetch CSV using cookies
+fun fetchCsv(url: String?, cookies: String) {
+    val apiUrl = "$url/api/csv" // Modify to your actual API endpoint
+
+    Thread {
+        try {
+            val connection = URL(apiUrl).openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            syncCookiesToConnection(url, connection, cookies)
+
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                // Process the CSV content here
+                val inputStream = connection.inputStream
+                // Read and save the input stream as needed
+            } else {
+                Log.e("CSV Fetch Error", "Non-Ok response from server: $responseCode")
+            }
+        } catch (e: Exception) {
+            Log.e("CSV Fetch Error", "Error fetching CSV: ${e.message}")
+        }
+    }.start()
+}
+
+// Function to synchronize cookies with the connection
+fun syncCookiesToConnection(url: String?, connection: HttpURLConnection, cookies: String) {
+    connection.setRequestProperty("Cookie", cookies)
 }
 
 fun syncCookiesToConnection(url: String, connection: HttpURLConnection) {
