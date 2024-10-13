@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.net.HttpURLConnection
 
 class MainActivity2 : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,7 +66,7 @@ fun WebViewScreen2() {
                                 csvContent = fetchCsvContent(url.toString())
 
                                 // Log the content to verify
-                                Log.d("CSV Content", csvContent)
+                                Log.e("CSV Content", csvContent)
 
                                 if (csvContent.isNotEmpty()) {
                                     // Trigger file saving after downloading CSV
@@ -90,18 +91,43 @@ fun WebViewScreen2() {
 suspend fun fetchCsvContent(url: String): String {
     return try {
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+
+        // Sync cookies from the WebView to this network request
+        syncCookiesToConnection(url, connection)
+
         connection.requestMethod = "GET"
-        val inputStream = connection.inputStream
-        val csvData = inputStream.bufferedReader().use { it.readText() }
 
-        // Log the response for debugging
-        Log.d("CSV Data Fetched", csvData)
+        // Check the response code first
+        val responseCode = connection.responseCode
+        Log.e("CSV API Response Code", "$responseCode")
 
-        csvData
+        // Only proceed if the response code is 200 (OK)
+        if (responseCode == 200) {
+            val inputStream = connection.inputStream
+            val csvData = inputStream.bufferedReader().use { it.readText() }
+
+            // Log the response for debugging
+            Log.e("CSV Data Fetched", csvData)
+
+            csvData
+        } else {
+            Log.e("CSV Fetch Error", "Non-OK response from server: $responseCode")
+            ""
+        }
     } catch (e: Exception) {
         Log.e("CSV Fetch Error", "Error fetching CSV: ${e.message}")
         e.printStackTrace()
         ""
+    }
+}
+
+fun syncCookiesToConnection(url: String, connection: HttpURLConnection) {
+    val cookieManager = CookieManager.getInstance()
+    val cookies = cookieManager.getCookie(url)
+
+    if (cookies != null) {
+        connection.setRequestProperty("Cookie", cookies)
+        Log.e("Cookies Sent", cookies) // Log the cookies sent for debugging
     }
 }
 
