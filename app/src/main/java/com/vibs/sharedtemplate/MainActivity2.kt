@@ -3,6 +3,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -68,12 +69,14 @@ fun WebViewScreen2() {
 
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                    if (url != null && url.endsWith(".csv")) {
-                        handleCsvDownload(view!!, url)
-                        return true // We are handling the download
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    request?.url?.let { url ->
+                        if (url.toString().endsWith(".csv")) {
+                            handleCsvDownload(view!!, url.toString())
+                            return true // We are handling the download
+                        }
                     }
-                    return false // Let WebView load other URLs normally
+                    return super.shouldOverrideUrlLoading(view, request)
                 }
             }
 
@@ -82,6 +85,7 @@ fun WebViewScreen2() {
     })
 }
 
+// Intercepts and handles the CSV download URL
 fun handleCsvDownload(webView: WebView, url: String) {
     val jsCode = """
         (function() {
@@ -102,6 +106,7 @@ fun handleCsvDownload(webView: WebView, url: String) {
     webView.evaluateJavascript(jsCode, null)
 }
 
+// Saves the CSV content to the device storage
 fun handleCsvSave(uri: Uri, csvData: String, context: Context) {
     try {
         // Save the CSV content directly to the file
