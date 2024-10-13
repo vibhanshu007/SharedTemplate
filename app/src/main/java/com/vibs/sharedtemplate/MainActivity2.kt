@@ -1,11 +1,7 @@
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,6 +14,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.IOException
 
 class MainActivity2 : ComponentActivity() {
@@ -54,62 +53,46 @@ fun WebViewScreen2() {
         WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.javaScriptCanOpenWindowsAutomatically = true
-            settings.setSupportMultipleWindows(true)
 
-            // Inject JavaScript interface for CSV handling
-            addJavascriptInterface(object {
-                @JavascriptInterface
-                fun processCsvBlob(csvDataFromJS: String) {
-                    // Store the CSV content and prompt the user to save the file
-                    csvContent = csvDataFromJS
-                    createDocumentLauncher.launch("downloaded_file.csv")
-                }
-            }, "androidInterface")
-
-            webChromeClient = WebChromeClient()
+            // WebView client to handle API calls and downloads
             webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     request?.url?.let { url ->
-                        if (url.toString().endsWith(".csv")) {
-                            handleCsvDownload(view!!, url.toString())
-                            return true // We are handling the download
+                        // Check if this is the API call returning the CSV
+                        if (url.toString().contains("your-csv-api-endpoint")) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                // Fetch the CSV content
+                                csvContent = fetchCsvContent(url.toString())
+                                // Trigger file saving after downloading CSV
+                                createDocumentLauncher.launch("report.csv")
+                            }
+                            return null
                         }
                     }
-                    return super.shouldOverrideUrlLoading(view, request)
+                    return super.shouldInterceptRequest(view, request)
                 }
             }
-
             loadUrl("https://your-web-url.com") // Load your web URL here
         }
     })
 }
 
-// Intercepts and handles the CSV download URL
-fun handleCsvDownload(webView: WebView, url: String) {
-    val jsCode = """
-        (function() {
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', '$url', true);
-            xhr.responseType = 'text';  // Expect plain text CSV data
-            xhr.onload = function() {
-                if (xhr.status === 200) {
-                    var csvData = xhr.responseText;  // Get raw CSV content
-                    window.androidInterface.processCsvBlob(csvData);  // Send it to Android
-                }
-            };
-            xhr.send();
-        })();
-    """.trimIndent()
-
-    // Inject the JavaScript to download the CSV file
-    webView.evaluateJavascript(jsCode, null)
+// Function to fetch the CSV content from the server API
+suspend fun fetchCsvContent(url: String): String {
+    return try {
+        val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        connection.requestMethod = "GET"
+        val inputStream = connection.inputStream
+        inputStream.bufferedReader().use { it.readText() }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ""
+    }
 }
 
-// Saves the CSV content to the device storage
+// Function to save the CSV content to the device storage
 fun handleCsvSave(uri: Uri, csvData: String, context: Context) {
     try {
-        // Save the CSV content directly to the file
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
             outputStream.write(csvData.toByteArray())
             Toast.makeText(context, "CSV file saved successfully", Toast.LENGTH_LONG).show()
