@@ -1,6 +1,7 @@
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.webkit.*
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -8,8 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,7 +45,7 @@ fun WebViewScreen2() {
             // Once the Uri is selected, save the file
             handleCsvSave(uri, csvContent, context)
         } else {
-            Toast.makeText(context, "No CSV data to save", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "No CSV data to save or data is empty", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -63,8 +63,17 @@ fun WebViewScreen2() {
                             CoroutineScope(Dispatchers.IO).launch {
                                 // Fetch the CSV content
                                 csvContent = fetchCsvContent(url.toString())
-                                // Trigger file saving after downloading CSV
-                                createDocumentLauncher.launch("report.csv")
+
+                                // Log the content to verify
+                                Log.d("CSV Content", csvContent)
+
+                                if (csvContent.isNotEmpty()) {
+                                    // Trigger file saving after downloading CSV
+                                    createDocumentLauncher.launch("report.csv")
+                                } else {
+                                    Log.e("CSV Error", "CSV content is empty.")
+                                    Toast.makeText(context, "CSV content is empty", Toast.LENGTH_SHORT).show()
+                                }
                             }
                             return null
                         }
@@ -83,8 +92,14 @@ suspend fun fetchCsvContent(url: String): String {
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         connection.requestMethod = "GET"
         val inputStream = connection.inputStream
-        inputStream.bufferedReader().use { it.readText() }
+        val csvData = inputStream.bufferedReader().use { it.readText() }
+
+        // Log the response for debugging
+        Log.d("CSV Data Fetched", csvData)
+
+        csvData
     } catch (e: Exception) {
+        Log.e("CSV Fetch Error", "Error fetching CSV: ${e.message}")
         e.printStackTrace()
         ""
     }
@@ -94,8 +109,12 @@ suspend fun fetchCsvContent(url: String): String {
 fun handleCsvSave(uri: Uri, csvData: String, context: Context) {
     try {
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-            outputStream.write(csvData.toByteArray())
-            Toast.makeText(context, "CSV file saved successfully", Toast.LENGTH_LONG).show()
+            if (csvData.isNotEmpty()) {
+                outputStream.write(csvData.toByteArray())
+                Toast.makeText(context, "CSV file saved successfully", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "No CSV data to save", Toast.LENGTH_LONG).show()
+            }
         }
     } catch (e: IOException) {
         Toast.makeText(context, "Error saving file: ${e.message}", Toast.LENGTH_LONG).show()
